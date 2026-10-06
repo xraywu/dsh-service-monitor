@@ -8,7 +8,8 @@ DeepSeek Harness 插件：监控 AI Agent 常用第三方服务的**剩余余额
 - 展示面：**主面板看板**（侧边栏图标点选）+ **侧边栏状态图标**（带健康状态圆点）+ **设置 → 服务余额监控**（同一页，便于填 Key）
 - 界面中英双语，深浅色跟随宿主主题令牌 `--dsw-alias-*`
 
-** 暂时只支持提供了余额查询 API 的服务： ** 还有一些常用服务如 `Brave` 等未提供余额查询 API，因此暂不支持监控。
+**暂时只支持提供了余额查询 API 的服务：** 还有一些常用服务如 `Brave` 等未提供余额查询 API，因此暂不支持监控。
+
 
 ## 安装
 
@@ -22,6 +23,7 @@ dsh plugin add dsh-service-monitor
 
 > 已经装过旧版的用户：状态文件里记着当时的服务列表，新加的服务不会自动加入刷新队列，而是出现在看板底部「可启用的服务」里，点一下「启用」即可 —— 这样不会凭空多出一堆「未配置」卡片，也不会对没配 Key 的服务发起请求。
 
+
 ## 使用
 
 1. 打开看板（侧边栏图标，或「设置 → 服务余额监控」）。
@@ -30,6 +32,7 @@ dsh plugin add dsh-service-monitor
 4. 点「立即刷新」可随时查询；卡片会显示剩余额度、总量、进度条、套餐、耗时。
 
 额度低于 15% 转黄、为 0 转红，并在侧边栏图标的角标上体现。
+
 
 ## API Key 存放是否安全？
 
@@ -42,6 +45,7 @@ dsh plugin add dsh-service-monitor
 3. **进程环境变量**：`TAVILY_API_KEY` / `BOCHA_API_KEY`(或 `BOCHA_KEY`) / `FIRECRAWL_API_KEY` / `SERPAPI_API_KEY`(或 `SERP_API_KEY`) / `TINYFISH_API_KEY`。
 
 API Key **永远不会**通过 HTTP 接口回传给页面：`/state` 只返回「有没有配」「来源是哪一类」。
+
 
 ## 各服务余额接口
 
@@ -56,6 +60,7 @@ API Key **永远不会**通过 HTTP 接口回传给页面：`/state` 只返回�
 > **关于 Firecrawl 的「重置时间」**：Firecrawl 的账单接口**没有任何额度重置字段**。v2 OpenAPI 里 `/team/credit-usage` 只有 `remainingCredits` / `planCredits` / `billingPeriodStart` / `billingPeriodEnd`，`/team/token-usage` 同样只有计费周期起止，`/team/credit-usage/historical` 只有 `startDate` / `endDate` / `totalCredits`。年付套餐的 `billingPeriodEnd` 是套餐到期日，与「每月额度重置」不是一回事 —— 所以卡片显示的是**计费周期起止**，而不是一个被标错成「重置时间」的日期。
 >
 > **关于「余额为 0」**：状态判定不依赖「剩余/总额」比例。像博查、TinyFish 这种只有余额没有套餐总量的接口算不出比例，但余额 `<= 0` 一律判为耗尽（红），侧边栏角标与卡片用同一套判定。
+
 
 ## 配置
 
@@ -72,6 +77,7 @@ API Key **永远不会**通过 HTTP 接口回传给页面：`/state` 只返回�
         trustedHosts: []             # 额外允许的 Host 头(反代场景)
 ```
 
+
 ## HTTP 接口
 
 同源前缀 `/service-monitor/api`（仅回环地址与 `trustedHosts` 可访问，带 `Origin` 时要求与 `Host` 同源）：
@@ -83,6 +89,7 @@ API Key **永远不会**通过 HTTP 接口回传给页面：`/state` 只返回�
 | POST | `/config` | `{ intervalMinutes?, services?, autoRefresh? }` |
 | POST | `/key` | `{ service, key }`，`key: ""` 表示移除 |
 | POST | `/refresh` | `{ service? }`，不传则刷新全部启用的服务 |
+
 
 ## 开发
 
