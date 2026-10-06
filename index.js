@@ -33,6 +33,20 @@ const REQUEST_TIMEOUT_MS = 15000
 const BODY_LIMIT_BYTES = 64 * 1024
 const STARTUP_REFRESH_DELAY_MS = 2500
 
+/**
+ * 注入用的系统提示词段落 order。
+ *
+ * 宿主把段落按 order 升序拼装,内置表 `SECTION_ORDERS` 里最大的一项是
+ * `DEPLOYMENT_PERSONA_SUFFIX: 10200`,所以取一个更大的值就等于「所有系统
+ * 段落之后、用户消息之前」—— 这正是要的位置:余额是会变的数据,放在系统
+ * 提示词末尾,变化只影响尾部,前面那段稳定的前缀仍然命中提示词缓存。
+ * 若将来宿主把这个数提到 10300 以上,这个值需要跟着调大。
+ */
+export const PROMPT_SECTION_ORDER = 10300
+
+/** 会话上下文中该段落的稳定名字。 */
+const PROMPT_SECTION_NAME = 'service-monitor:balances'
+
 /** 用户可见的服务端文案(zh/en),随宿主语言选择。 */
 const MESSAGES = {
   zh: {
@@ -54,6 +68,19 @@ const MESSAGES = {
     keyTooLong: 'API Key 过长',
     keyEmpty: 'API Key 不能为空',
     cleared: 'API Key 已移除',
+    // 注入上下文用的文案
+    promptTitle: '第三方服务余额',
+    promptMeta: '每 {interval} 分钟刷新 · 更新于 {time}',
+    promptMetaPending: '每 {interval} 分钟刷新 · 尚未取到数据',
+    promptAmount: '剩余 {amount}{unit}',
+    promptNoReading: '暂无数值',
+    promptDepleted: '已耗尽',
+    promptNoKey: '未配置 API Key',
+    promptFailed: '查询失败 —— {message}',
+    unitCredits: '额度',
+    unitRequests: '次',
+    unitUsd: '美元',
+    unitCny: '元',
   },
   en: {
     noKey: 'No API key configured yet',
@@ -74,7 +101,30 @@ const MESSAGES = {
     keyTooLong: 'API key is too long',
     keyEmpty: 'API key must not be empty',
     cleared: 'API key removed',
+    // copy for the injected context block
+    promptTitle: 'Third-party service balances',
+    promptMeta: 'refreshed every {interval} min · as of {time}',
+    promptMetaPending: 'refreshed every {interval} min · no reading yet',
+    promptAmount: '{amount}{unit} remaining',
+    promptNoReading: 'no readable value',
+    promptDepleted: 'depleted',
+    promptNoKey: 'no API key configured',
+    promptFailed: 'query failed — {message}',
+    unitCredits: 'credits',
+    unitRequests: 'requests',
+    unitUsd: 'USD',
+    unitCny: 'CNY',
   },
+}
+
+/**
+ * 渲染一条文案。抽成模块级纯函数,是为了让注入上下文的文本能在 test/ 里
+ * 直接断言 —— 那段文字会进入每一轮模型请求,值得有个测试盯着。
+ */
+function message(lang, key, params = {}) {
+  const dict = MESSAGES[lang] ?? MESSAGES.en
+  const template = dict[key] ?? MESSAGES.en[key] ?? key
+  return String(template).replace(/\{(\w+)\}/g, (_, name) => (name in params ? String(params[name]) : `{${name}}`))
 }
 
 // ── 小工具 ───────────────────────────────────────────────────────────────────
@@ -457,6 +507,79 @@ export function normalizeSerpapi(body) {
 
 const PROVIDER_BY_ID = new Map(PROVIDERS.map((p) => [p.id, p]))
 
+// ── 注入上下文 ───────────────────────────────────────────────────────────────
+
+/** 注入文本里的金额格式,跟界面保持一致的写法。 */
+function promptAmount(value, unit) {
+  if (value === null || value === undefined) return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) return null
+  if (unit === 'usd') return `$${n.toFixed(2)}`
+  if (unit === 'cny') return `¥${n.toFixed(2)}`
+  return String(Math.round(n * 100) / 100)
+}
+
+const unitWord = (lang, unit) => message(lang, `unit${unit === 'usd' ? 'Usd' : unit === 'cny' ? 'Cny' : unit === 'requests' ? 'Requests' : 'Credits'}`)
+
+/**
+ * 生成注入系统提示词尾部的余额块。纯函数:不读全局状态,测试可直接喂数据。
+ *
+ * 约定:
+ *   - 只列**已启用**的服务,一行一个,顺序固定(便于命中缓存);
+ *   - 没有任何已启用服务时返回空串,让调用方干脆不注册段落;
+ *   - 余额 <= 0 标注「已耗尽」—— 这是模型最该知道的一条事实。
+ *
+ * @param {object} input
+ * @param {'zh'|'en'} input.lang 文案语言。
+ * @param {number} input.intervalMinutes 当前刷新间隔。
+ * @param {string|null} input.lastRefreshAt 最近一次成功刷新时间。
+ * @param {Array<{id: string, label: {zh: string, en: string}, unit: string, enabled: boolean}>} input.providers 服务元信息。
+ * @param {Record<string, object>} input.results 各服务最近一次查询结果。
+ * @returns {string} markdown 片段;无内容时为 ''。
+ */
+export function buildBalancePromptText({ lang = 'en', intervalMinutes, lastRefreshAt, providers = [], results = {} } = {}) {
+  const enabled = providers.filter((p) => p.enabled)
+  if (enabled.length === 0) return ''
+  const lines = []
+  for (const provider of enabled) {
+    const label = typeof provider?.label?.[lang] === 'string' ? provider.label[lang] : String(provider?.id ?? '?')
+    const result = results[provider.id]
+    if (!result) {
+      lines.push(`- ${label}: ${message(lang, 'promptNoKey')}`)
+      continue
+    }
+    if (result.status === 'unconfigured') {
+      lines.push(`- ${label}: ${message(lang, 'promptNoKey')}`)
+      continue
+    }
+    if (result.status !== 'ok') {
+      lines.push(`- ${label}: ${message(lang, 'promptFailed', { message: result.message ?? result.code ?? 'error' })}`)
+      continue
+    }
+    const unit = unitWord(lang, provider.unit)
+    const remaining = promptAmount(result.remaining, provider.unit)
+    const total = promptAmount(result.total, provider.unit)
+    let body
+    if (remaining === null) {
+      body = message(lang, 'promptNoReading')
+    } else {
+      // 货币已经带符号,再缀一个「美元/CNY」既啰嗦又难看,所以只有计数型单位才追加。
+      const currency = provider.unit === 'usd' || provider.unit === 'cny'
+      const unitText = currency ? '' : ` ${unit}`
+      const amountText = total !== null ? `${remaining} / ${total}` : remaining
+      body = message(lang, 'promptAmount', { amount: amountText, unit: unitText }).trim()
+    }
+    const depleted = Number.isFinite(Number(result.remaining)) && Number(result.remaining) <= 0
+    lines.push(`- ${label}: ${body}${depleted ? ` (${message(lang, 'promptDepleted')})` : ''}`)
+  }
+  if (lines.length === 0) return ''
+  const time = typeof lastRefreshAt === 'string' && lastRefreshAt.length > 0 ? new Date(lastRefreshAt).toLocaleTimeString() : null
+  const meta = time === null
+    ? message(lang, 'promptMetaPending', { interval: intervalMinutes })
+    : message(lang, 'promptMeta', { interval: intervalMinutes, time })
+  return [`## ${message(lang, 'promptTitle')}`, `(${meta})`, ...lines].join('\n')
+}
+
 // ── 状态文件 ─────────────────────────────────────────────────────────────────
 
 /** $DSH_HOME 的解析规则与 @deepseek-ai/dsh-home-paths 一致。 */
@@ -471,7 +594,13 @@ const stateFile = () => join(stateDir(), 'state.json')
 
 const emptyState = () => ({
   version: STATE_VERSION,
-  config: { intervalMinutes: DEFAULT_INTERVAL_MINUTES, services: PROVIDERS.map((p) => p.id), autoRefresh: true },
+  config: {
+    intervalMinutes: DEFAULT_INTERVAL_MINUTES,
+    services: PROVIDERS.map((p) => p.id),
+    autoRefresh: true,
+    // 默认关闭:往用户每一轮对话里塞东西,必须是用户主动开的事。
+    injectBalances: false,
+  },
   keys: {},
   results: {},
   lastRefreshAt: null,
@@ -511,6 +640,12 @@ function mergeState(raw, bootConfig) {
         : typeof boot.autoRefresh === 'boolean'
           ? boot.autoRefresh
           : base.config.autoRefresh,
+    injectBalances:
+      typeof savedConfig.injectBalances === 'boolean'
+        ? savedConfig.injectBalances
+        : typeof boot.injectBalances === 'boolean'
+          ? boot.injectBalances
+          : base.config.injectBalances,
   }
   const keys = {}
   if (isObject(saved.keys)) {
@@ -567,11 +702,62 @@ export function apply(ctx, bootConfig = {}) {
       return 'en'
     }
   }
-  const msg = (key, params = {}) => {
-    const dict = MESSAGES[lang()] ?? MESSAGES.en
-    const template = dict[key] ?? MESSAGES.en[key] ?? key
-    return template.replace(/\{(\w+)\}/g, (_, name) => (name in params ? String(params[name]) : `{${name}}`))
+  const msg = (key, params = {}) => message(lang(), key, params)
+
+  // ── 注入系统提示词 ────────────────────────────────────────────────────────
+  //
+  // systemPrompt 是可选服务:组合里没有它时,这个开关就静静地什么都不做,
+  // 而不是让整个插件挂掉。用嵌套 inject 等它出现。
+
+  let promptCtx = null
+  let sectionDisposer = null
+
+  function disposeSection() {
+    if (sectionDisposer === null) return
+    const disposer = sectionDisposer
+    sectionDisposer = null
+    try {
+      disposer()
+    } catch (error) {
+      warn('prompt section disposal failed:', error?.message ?? error)
+    }
   }
+
+  /** 开关打开才注册段落;关掉时连空段落都不留。 */
+  function syncPromptSection() {
+    if (promptCtx === null || state.config.injectBalances !== true) {
+      disposeSection()
+      return
+    }
+    if (sectionDisposer !== null) return
+    const snapshot = () => ({
+      lang: lang(),
+      intervalMinutes: state.config.intervalMinutes,
+      lastRefreshAt: state.lastRefreshAt,
+      providers: PROVIDERS.map((p) => ({ id: p.id, label: p.label, unit: p.unit, enabled: state.config.services.includes(p.id) })),
+      results: state.results,
+    })
+    try {
+      sectionDisposer = promptCtx.systemPrompt.section({
+        name: PROMPT_SECTION_NAME,
+        order: PROMPT_SECTION_ORDER,
+        // 每次装配时求值,所以拿到的是缓存里的最新读数。
+        text: () => buildBalancePromptText(snapshot()),
+      })
+    } catch (error) {
+      sectionDisposer = null
+      warn('could not register the prompt section:', error?.message ?? error)
+    }
+  }
+
+  ctx.inject(['systemPrompt'], (scoped) => {
+    promptCtx = scoped
+    syncPromptSection()
+    return () => {
+      promptCtx = null
+      disposeSection()
+    }
+  })
 
   // ── 持久化 ────────────────────────────────────────────────────────────────
 
@@ -929,6 +1115,7 @@ export function apply(ctx, bootConfig = {}) {
         intervalMinutes: state.config.intervalMinutes,
         services: state.config.services,
         autoRefresh: state.config.autoRefresh,
+        injectBalances: state.config.injectBalances === true,
       },
       intervalChoices: INTERVAL_CHOICES,
       providers,
@@ -1006,10 +1193,13 @@ export function apply(ctx, bootConfig = {}) {
         }
       }
       if (typeof body.autoRefresh === 'boolean') state.config.autoRefresh = body.autoRefresh
+      if (typeof body.injectBalances === 'boolean') state.config.injectBalances = body.injectBalances
       dirty = true
       touch()
       await save()
       schedule()
+      // 开/关立刻反映到提示词上,不用等下一次刷新。
+      syncPromptSection()
       sendJson(res, 200, await snapshot())
       return
     }
@@ -1083,6 +1273,7 @@ export function apply(ctx, bootConfig = {}) {
     return () => {
       disposed = true
       clearTimer()
+      disposeSection()
       if (saveTimer !== null) {
         clearTimeout(saveTimer)
         saveTimer = null
@@ -1101,6 +1292,8 @@ export function apply(ctx, bootConfig = {}) {
   void (async () => {
     await load()
     log(`mounted at ${API_BASE}; interval ${state.config.intervalMinutes} min; services: ${state.config.services.join(', ') || 'none'}`)
+    // 持久化里如果开着注入,启动时就把段落挂上。
+    syncPromptSection()
     schedule()
     startupTimer = setTimeout(() => {
       startupTimer = null

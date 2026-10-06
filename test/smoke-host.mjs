@@ -67,6 +67,17 @@ function checkThrowsCode(label, fn, expectedCode) {
 
 const routes = []
 const disposers = []
+/** Prompt sections the plugin registers through `systemPrompt.section()`. */
+const promptSections = []
+const systemPrompt = {
+  section(definition) {
+    promptSections.push(definition)
+    return () => {
+      const index = promptSections.indexOf(definition)
+      if (index >= 0) promptSections.splice(index, 1)
+    }
+  },
+}
 const ctx = {
   logger: { info: (...a) => console.log('  [host]', ...a), warn: (...a) => console.log('  [host:warn]', ...a) },
   effect(callback, label) {
@@ -76,6 +87,13 @@ const ctx = {
   },
   get() {
     return undefined
+  },
+  /** Nested inject, the way the plugin asks for the optional systemPrompt service. */
+  inject(services, callback) {
+    const scoped = {}
+    for (const name of services) if (name === 'systemPrompt') scoped.systemPrompt = systemPrompt
+    const disposer = callback(scoped)
+    return typeof disposer === 'function' ? disposer : () => {}
   },
   webServer: {
     register(route) {
@@ -172,6 +190,81 @@ try {
   const nextRefresh = (await (await get('/state')).json()).nextRefreshAt
   check('nextRefreshAt is null while paused', nextRefresh === null, `got ${nextRefresh}`)
   await post('/config', { autoRefresh: true, services: ['tavily', 'bocha', 'firecrawl', 'serpapi'] })
+
+  console.log('\n== context injection toggle ==')
+  check('balances are NOT injected by default', (await (await get('/state')).json()).config.injectBalances === false)
+  check('no prompt section is registered while off', promptSections.length === 0, `got ${promptSections.length}`)
+
+  const enabled = await post('/config', { injectBalances: true })
+  check('toggle on is accepted', (await enabled.json()).config.injectBalances === true)
+  check('exactly one prompt section registered', promptSections.length === 1, `got ${promptSections.length}`)
+  const section = promptSections[0]
+  check('section uses the plugin-owned name', section?.name === 'service-monitor:balances', String(section?.name))
+  check(
+    'section is ordered after every built-in section (DEPLOYMENT_PERSONA_SUFFIX = 10200)',
+    typeof section?.order === 'number' && section.order > 10200,
+    `order=${section?.order}`,
+  )
+  check('section text is evaluated lazily', typeof section?.text === 'function')
+  const injected = section.text({})
+  check('injected text names the plugin block', injected.startsWith('## '), JSON.stringify(injected.slice(0, 40)))
+  check('injected text lists an enabled service', /Tavily|博查|Bocha/.test(injected), JSON.stringify(injected))
+  check('injected text is one block per enabled service', injected.split('\n').length === 2 + 4, JSON.stringify(injected.split('\n').length))
+  check('injected text never carries a key', !/tvly-|sk-|fc-/.test(injected))
+
+  const offAgain = await post('/config', { injectBalances: false })
+  check('toggle off is accepted', (await offAgain.json()).config.injectBalances === false)
+  check('section is disposed when switched off', promptSections.length === 0, `got ${promptSections.length}`)
+
+  console.log('\n== buildBalancePromptText ==')
+  const { buildBalancePromptText, PROMPT_SECTION_ORDER } = plugin
+  const providers = [
+    { id: 'tavily', label: { zh: 'Tavily 搜索', en: 'Tavily' }, unit: 'credits', enabled: true },
+    { id: 'bocha', label: { zh: '博查', en: 'Bocha' }, unit: 'cny', enabled: true },
+    { id: 'serpapi', label: { zh: 'SerpAPI', en: 'SerpAPI' }, unit: 'requests', enabled: true },
+    { id: 'tinyfish', label: { zh: 'TinyFish', en: 'TinyFish' }, unit: 'usd', enabled: false },
+  ]
+  check('the exported order matches the registered one', PROMPT_SECTION_ORDER > 10200, String(PROMPT_SECTION_ORDER))
+  check('no enabled services → empty text', buildBalancePromptText({ lang: 'en', providers: [], results: {} }) === '')
+  check(
+    'a disabled-only set → empty text',
+    buildBalancePromptText({ lang: 'en', providers: providers.map((p) => ({ ...p, enabled: false })), results: {} }) === '',
+  )
+
+  const text = buildBalancePromptText({
+    lang: 'en',
+    intervalMinutes: 10,
+    lastRefreshAt: '2026-10-06T02:34:41Z',
+    providers,
+    results: {
+      tavily: { status: 'ok', remaining: 14500, total: 15000 },
+      bocha: { status: 'ok', remaining: 0, total: null },
+      serpapi: { status: 'error', message: 'API key is invalid or expired (HTTP 401)' },
+    },
+  })
+  const textLines = text.split('\n')
+  check('heading names the block', textLines[0] === '## Third-party service balances', JSON.stringify(textLines[0]))
+  check('meta line carries interval and time', textLines[1].includes('10') && textLines[1].includes(':'), JSON.stringify(textLines[1]))
+  check('remaining of total rendered', textLines.some((l) => l === '- Tavily: 14500 / 15000 credits remaining'), JSON.stringify(textLines))
+  check(
+    'a currency does not repeat its unit word',
+    textLines.some((l) => l === '- Bocha: ¥0.00 remaining (depleted)'),
+    JSON.stringify(textLines),
+  )
+  check('failure is reported, not hidden', textLines.some((l) => l.startsWith('- SerpAPI: query failed —')), JSON.stringify(textLines))
+  check('disabled service is left out', !text.includes('TinyFish'), text)
+  check('exactly one line per enabled service', textLines.length === 2 + 3, JSON.stringify(textLines))
+
+  const zhText = buildBalancePromptText({
+    lang: 'zh',
+    intervalMinutes: 5,
+    lastRefreshAt: null,
+    providers,
+    results: { tavily: { status: 'unconfigured' } },
+  })
+  check('zh heading rendered', zhText.startsWith('## 第三方服务余额'), JSON.stringify(zhText))
+  check('zh meta falls back to "no reading yet"', zhText.includes('尚未取到数据'), zhText)
+  check('unconfigured service is listed', zhText.includes('未配置 API Key'), zhText)
 
   console.log('\n== POST /key ==')
   const shortKey = await post('/key', { service: 'tavily', key: 'x'.repeat(600) })
@@ -490,7 +583,7 @@ try {
       tavily: { status: 'error', code: 'unauthorized', message: 'API key is invalid or expired (HTTP 401)', httpStatus: 401, fetchedAt: '2026-10-06T02:34:41Z' },
     },
     refreshing: ['firecrawl'],
-    config: { intervalMinutes: 1, autoRefresh: true, services: ['bocha', 'firecrawl'] },
+    config: { intervalMinutes: 1, autoRefresh: true, injectBalances: true, services: ['bocha', 'firecrawl'] },
     intervalChoices: [1, 5, 10, 30],
     lastRefreshAt: '2026-10-06T02:34:41Z',
     nextRefreshAt: '2026-10-06T02:35:41Z',

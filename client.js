@@ -34,6 +34,8 @@ window.__ModuleLoader__.load({
         refreshNow: '立即刷新',
         refreshing: '查询中…',
         autoRefresh: '定时刷新',
+        injectLabel: '注入余额到上下文',
+        injectHint: '开启后，已启用服务的余额会作为系统提示词的最后一段注入（在用户消息之前）。易变的数据放在末尾，变化只影响尾部缓存，前面的提示词前缀依然命中。',
         intervalLabel: '刷新间隔',
         intervalWarn: '1 分钟间隔会频繁请求各服务接口，可能触发对方的频率限制。',
         minutes: '{n} 分钟',
@@ -107,6 +109,8 @@ window.__ModuleLoader__.load({
         refreshNow: 'Refresh now',
         refreshing: 'Querying…',
         autoRefresh: 'Scheduled refresh',
+        injectLabel: 'Inject balances into context',
+        injectHint: 'When on, enabled services’ balances are injected as the last system-prompt section (just before the user message). Volatile data sits at the very end, so a change only invalidates the tail of the prompt cache.',
         intervalLabel: 'Interval',
         intervalWarn: 'A 1-minute interval queries each provider very often and may hit their rate limits.',
         minutes: '{n} min',
@@ -363,6 +367,9 @@ window.__ModuleLoader__.load({
       },
       async setAutoRefresh(autoRefresh) {
         store.applySnapshot(await post('/config', { autoRefresh }))
+      },
+      async setInjectBalances(injectBalances) {
+        store.applySnapshot(await post('/config', { injectBalances }))
       },
       async setServiceEnabled(id, enabled) {
         const current = store.data?.config?.services ?? []
@@ -725,6 +732,16 @@ window.__ModuleLoader__.load({
           label: t('autoRefresh'),
           onChange: (next) => void actions.setAutoRefresh(next).catch(() => {}),
         })),
+        h(
+          'span',
+          { style: { display: 'inline-flex', alignItems: 'center', gap: 6 }, title: t('injectHint') },
+          t('injectLabel'),
+          h(Switch, {
+            checked: data?.config?.injectBalances === true,
+            label: t('injectLabel'),
+            onChange: (next) => void actions.setInjectBalances(next).catch(() => {}),
+          }),
+        ),
         h('span', null, `${t('lastRefresh')}: ${timeText(data?.lastRefreshAt)}`),
         h('span', null, `${t('nextRefresh')}: ${auto ? timeText(data?.nextRefreshAt) : t('paused')}`),
         interval === 1 ? h('span', { style: { color: 'var(--dsw-alias-state-warn-primary)' } }, t('intervalWarn')) : null,
