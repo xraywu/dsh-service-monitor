@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "服务余额监控 (dsh-service-monitor)",
+    "description": "监控 Harness 常用第三方服务（Tavily、博查、Firecrawl、SerpAPI、TinyFish）的剩余余额与额度，支持 1/5/10/30 分钟定时刷新，提供主面板看板与侧边栏状态图标。"
+  }
+}

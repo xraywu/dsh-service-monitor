@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Service Monitor (dsh-service-monitor)",
+    "description": "Remaining balance and quota for the third-party services the Harness uses — Tavily, Bocha, Firecrawl, SerpAPI and TinyFish — on a 1/5/10/30-minute refresh, with a dashboard panel and a sidebar status icon."
+  }
+}

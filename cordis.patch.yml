@@ -1,0 +1,31 @@
+# dsh-service-monitor bundle patch: one Host row over the Web/Desktop profile.
+# The row name resolves from the profile's own node_modules, where
+# `plugin_manager` (install_bundle) installed this package.
+#
+# `config` here supplies BOOT DEFAULTS only. Everything a user changes in the
+# plugin's own panel (which services are on, the refresh interval, the API
+# keys) is persisted by the plugin under $DSH_HOME/storages/service-monitor/
+# and is not written back into this layer, so profile patches keep surviving
+# upgrades.
+- insert:
+    - id: service-monitor
+      name: dsh-service-monitor
+      config:
+        # One of 1, 5, 10, 30. Anything else falls back to 10.
+        intervalMinutes: 10
+        # Provider ids switched on at first boot. The panel can change this.
+        # An EXISTING installation keeps whatever its state file already says,
+        # so a newly supported provider shows up under "available" with a
+        # one-click enable instead of silently joining the refresh cycle.
+        services:
+          - tavily
+          - bocha
+          - firecrawl
+          - serpapi
+          - tinyfish
+        # Whether the scheduled refresh runs without a manual click.
+        autoRefresh: true
+        # Extra `Host` header authorities the API accepts, beyond the loopback
+        # names that are always allowed. Add an entry here only when the Web UI
+        # is reached through another hostname or a reverse proxy.
+        trustedHosts: []
