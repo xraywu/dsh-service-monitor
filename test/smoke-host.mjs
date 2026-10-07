@@ -18,6 +18,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
+import { PROMPT_SECTION_ORDER } from '../lib/constants.js'
+import { requireOk } from '../lib/net.js'
+import { buildBalancePromptText } from '../lib/prompt.js'
+import {
+  normalizeBocha,
+  normalizeFirecrawl,
+  normalizeSerpapi,
+  normalizeTavily,
+  normalizeTinyfish,
+} from '../lib/providers/index.js'
 
 const WITH_NETWORK = process.argv.includes('--network')
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
@@ -217,7 +227,6 @@ try {
   check('section is disposed when switched off', promptSections.length === 0, `got ${promptSections.length}`)
 
   console.log('\n== buildBalancePromptText ==')
-  const { buildBalancePromptText, PROMPT_SECTION_ORDER } = plugin
   const providers = [
     { id: 'tavily', label: { zh: 'Tavily 搜索', en: 'Tavily' }, unit: 'credits', enabled: true },
     { id: 'bocha', label: { zh: '博查', en: 'Bocha' }, unit: 'cny', enabled: true },
@@ -310,7 +319,6 @@ try {
   check('malformed JSON is 400', badJson.status === 400, `got ${badJson.status}`)
 
   console.log('\n== response normalizers (documented payloads) ==')
-  const { normalizeTavily, normalizeBocha, normalizeFirecrawl, normalizeSerpapi, normalizeTinyfish } = plugin
 
   // Tavily: /usage never returns a "remaining" field, so it is derived.
   const tavily = normalizeTavily({
@@ -392,7 +400,6 @@ try {
   // HTTP status → failure code. 402 is how several vendors report an exhausted
   // account; reporting it as a generic HTTP error would hide the one state this
   // plugin exists to surface.
-  const { requireOk } = plugin
   const res = (status, body = {}) => ({ status, ok: false, body })
   checkThrowsCode('401 maps to unauthorized', () => requireOk(res(401)), 'unauthorized')
   checkThrowsCode('402 maps to no-credits', () => requireOk(res(402, { error: 'Insufficient credits' })), 'no-credits')
