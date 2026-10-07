@@ -1,12 +1,24 @@
 {
   "name": "dsh-service-monitor",
   "version": "1.0.0",
-  "private": true,
   "description": "DeepSeek Harness 第三方服务余额监控插件：选择服务、录入 API Key、按 1/5/10/30 分钟定时查询剩余额度，提供主面板看板与侧边栏状态图标。只收录有余额查询接口的服务（Tavily、博查、Firecrawl、SerpAPI、TinyFish）。Third-party service balance monitor for DeepSeek Harness: pick services, enter API keys, refresh quota on a 1/5/10/30-minute schedule, with a main dashboard panel and a sidebar status icon. Only services with a real balance API are included (Tavily, Bocha, Firecrawl, SerpAPI, TinyFish).",
   "type": "module",
   "main": "index.js",
   "icon": "./icon.svg",
   "license": "MIT",
+  "author": "xraywu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xraywu/dsh-service-monitor.git"
+  },
+  "homepage": "https://github.com/xraywu/dsh-service-monitor#readme",
+  "bugs": {
+    "url": "https://github.com/xraywu/dsh-service-monitor/issues"
+  },
+  "scripts": {
+    "test": "node test/smoke-host.mjs",
+    "test:network": "node test/smoke-host.mjs --network"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -34,7 +46,6 @@
     "cordis.patch.yml",
     "icon.svg",
     "locale/*.json",
-    "docs/*.md",
     "test/*.mjs",
     "README.md"
   ],
