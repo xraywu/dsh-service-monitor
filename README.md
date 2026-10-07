@@ -14,7 +14,7 @@ DeepSeek Harness 插件：监控 AI Agent 常用第三方服务的**剩余余额
 
 ## 安装
 
-在 Harness 里用 `plugin_manager` 安装本目录的绝对路径：
+直接在 DSH 插件界面安装 `dsh-service-monitor` 或命令行安装：
 
 ```
 dsh plugin add dsh-service-monitor
