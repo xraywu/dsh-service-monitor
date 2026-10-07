@@ -209,6 +209,9 @@ window.__ModuleLoader__.load({
 .dsm-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}
 .dsm-btn:disabled{opacity:.5;cursor:default}
 .dsm-btn--primary{background:var(--dsw-alias-brand-primary);border-color:transparent;color:#fff}
+/* 主按钮 hover 必须自己兜住:上面的 .dsm-btn:hover 会把背景换成 bg-layer-2(浅色主题下近乎白),
+   而 --primary 的文字是 #fff,叠在一起就成了白底白字。用品牌色 + 亮度微调做反馈。 */
+.dsm-btn--primary:hover:not(:disabled){background:var(--dsw-alias-brand-primary);border-color:transparent;color:#fff;filter:brightness(1.14)}
 .dsm-btn--ghost{border-color:transparent;background:transparent;color:var(--dsw-alias-label-secondary)}
 .dsm-btn--ghost:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2)}
 .dsm-btn--danger{color:var(--dsw-alias-state-error-primary)}
@@ -217,9 +220,12 @@ window.__ModuleLoader__.load({
 .dsm-seg button{appearance:none;font-family:inherit;font-size:12px;padding:4px 10px;border:0;border-right:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dsm-seg button:last-child{border-right:0}
 .dsm-seg button[aria-pressed="true"]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600}
-.dsm-switch{position:relative;flex:none;width:34px;height:19px;padding:0;border-radius:999px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2);cursor:pointer}
-.dsm-switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary);border-color:transparent}
-.dsm-switch > i{position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;transition:transform .15s ease}
+/* 关闭态不能用 bg-layer-2 当轨道:它就是"嵌套表面"色,在本主题下与页面底色几乎一致,
+   只剩白色圆钮可见(看起来像"只有一个圆框")。改用专门表示"非激活"的 state-idle-primary,
+   并给圆钮加投影,保证浅色/深色主题下轨道与圆钮都有边界。 */
+.dsm-switch{position:relative;flex:none;width:34px;height:19px;padding:0;border-radius:999px;border:1px solid transparent;background:var(--dsw-alias-state-idle-primary);cursor:pointer;transition:background .15s ease}
+.dsm-switch[aria-checked="true"]{background:var(--dsw-alias-brand-primary)}
+.dsm-switch > i{position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.32);transition:transform .15s ease}
 .dsm-switch[aria-checked="true"] > i{transform:translateX(15px)}
 .dsm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(266px,1fr));gap:12px}
 .dsm-card{display:flex;flex-direction:column;gap:9px;min-width:0;padding:13px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}

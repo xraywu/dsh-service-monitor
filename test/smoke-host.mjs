@@ -301,8 +301,19 @@ try {
 
   // A refresh mutates state several times in a burst; the debounced write must
   // still land, otherwise a restart would lose every result again.
-  await new Promise((resolve) => setTimeout(resolve, 1800))
-  const afterRefresh = JSON.parse(await readFile(join(tempHome, 'storages', 'service-monitor', 'state.json'), 'utf8'))
+  // 轮询而不是固定 sleep:在 DNS 被墙/机器繁忙时,刷新那一轮请求可能超过写死的等待时间,
+  // 这一个断言就会偶发失败(实测撞到过一次 133/134),而后面的状态其实是对的。
+  const statePath = join(tempHome, 'storages', 'service-monitor', 'state.json')
+  let afterRefresh = null
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      afterRefresh = JSON.parse(await readFile(statePath, 'utf8'))
+      if (typeof afterRefresh.lastRefreshAt === 'string') break
+    } catch {
+      // 写入走 tmp+rename 原子替换,正常读不到半个文件;真撞上就再等一轮。
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
   check('refresh timestamp persisted', typeof afterRefresh.lastRefreshAt === 'string', JSON.stringify(afterRefresh.lastRefreshAt))
   check(
     'keyless provider persisted as unconfigured',
