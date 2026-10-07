@@ -114,6 +114,8 @@ API Key **永远不会**通过 HTTP 接口回传给页面：`/state` 只返回�
 
 ## 开发
 
+测试套件**随仓库提供，不打包进 npm 包**（`files` 里不含 `test/`，安装体积因此小约四分之一）；要跑就在克隆下来的仓库里执行：
+
 ```bash
 node test/smoke-host.mjs              # 离线：路由、配置、密钥、信任校验、响应解析
 node test/smoke-host.mjs --network    # 额外用无效 Key 实测每个厂商端点
