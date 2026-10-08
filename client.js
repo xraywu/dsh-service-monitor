@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
         injectLabel: '注入余额到上下文',
         injectHint: '开启后，已启用服务的余额会作为系统提示词的最后一段注入（在用户消息之前）。易变的数据放在末尾，变化只影响尾部缓存，前面的提示词前缀依然命中。',
         injectNoteLabel: '补充说明',
-        injectNoteHint: '开启注入后，这段文字会跟在余额块之后，用来告诉 Agent 如何在多个服务之间取舍。清空后保存即回到默认文案。',
+        injectNoteHint: '留空即用默认文案（灰色占位文字就是默认内容）。填写的文字会跟在余额块之后，用来告诉 Agent 如何在多个服务之间取舍。',
         injectNoteSave: '保存',
         injectNoteSaved: '已保存',
         injectNoteReset: '恢复默认',
@@ -118,7 +118,7 @@ window.__ModuleLoader__.load({
         injectLabel: 'Inject balances into context',
         injectHint: 'When on, enabled services’ balances are injected as the last system-prompt section (just before the user message). Volatile data sits at the very end, so a change only invalidates the tail of the prompt cache.',
         injectNoteLabel: 'Guidance note',
-        injectNoteHint: 'When injection is on, this text is appended after the balance block to tell the agent how to choose between services. Clear it and save to fall back to the built-in wording.',
+        injectNoteHint: 'Leave it empty to use the built-in wording shown as the placeholder. A note you type is appended after the balance block to tell the agent how to choose between services.',
         injectNoteSave: 'Save',
         injectNoteSaved: 'Saved',
         injectNoteReset: 'Reset to default',
@@ -794,7 +794,9 @@ window.__ModuleLoader__.load({
       const saved = typeof data?.config?.injectNote === 'string' ? data.config.injectNote : null
       const fallback = typeof data?.config?.injectNoteDefault === 'string' ? data.config.injectNoteDefault : ''
       const max = Number.isFinite(data?.config?.injectNoteMaxLength) ? data.config.injectNoteMaxLength : 2000
-      const effective = saved === null ? fallback : saved
+      // 没写过就是空框 + 默认文案当 placeholder:让「用默认」和「改过」在界面上
+      // 一眼可分,也免得用户以为框里那段是自己写的而不敢动。
+      const effective = saved === null ? '' : saved
       const [draft, setDraft] = useState(effective)
       const [busy, setBusy] = useState(false)
       const [savedAt, setSavedAt] = useState(0)
@@ -847,17 +849,19 @@ window.__ModuleLoader__.load({
             {
               type: 'button',
               className: 'dsm-btn dsm-btn--ghost',
-              disabled: disabled || busy || (saved === null && draft === fallback),
+              disabled: disabled || busy || (saved === null && draft.length === 0),
               onClick: () => save(''),
             },
             t('injectNoteReset'),
           ),
           h('span', { className: 'dsm-guide-hint' }, t('injectNoteHint')),
-          h(
-            'span',
-            { className: over ? 'dsm-guide-count dsm-guide-count--over' : 'dsm-guide-count' },
-            `${draft.length} / ${max}`,
-          ),
+          draft.length > 0
+            ? h(
+                'span',
+                { className: over ? 'dsm-guide-count dsm-guide-count--over' : 'dsm-guide-count' },
+                `${draft.length} / ${max}`,
+              )
+            : null,
           dirty ? h('span', { className: 'dsm-guide-state' }, t('injectNoteUnsaved')) : null,
           !dirty && savedAt > 0 ? h('span', { className: 'dsm-guide-state' }, t('injectNoteSaved')) : null,
         ),
