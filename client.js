@@ -36,6 +36,12 @@ window.__ModuleLoader__.load({
         autoRefresh: '定时刷新',
         injectLabel: '注入余额到上下文',
         injectHint: '开启后，已启用服务的余额会作为系统提示词的最后一段注入（在用户消息之前）。易变的数据放在末尾，变化只影响尾部缓存，前面的提示词前缀依然命中。',
+        injectNoteLabel: '补充说明',
+        injectNoteHint: '开启注入后，这段文字会跟在余额块之后，用来告诉 Agent 如何在多个服务之间取舍。清空后保存即回到默认文案。',
+        injectNoteSave: '保存',
+        injectNoteSaved: '已保存',
+        injectNoteReset: '恢复默认',
+        injectNoteUnsaved: '未保存',
         intervalLabel: '刷新间隔',
         intervalWarn: '1 分钟间隔会频繁请求各服务接口，可能触发对方的频率限制。',
         minutes: '{n} 分钟',
@@ -111,6 +117,12 @@ window.__ModuleLoader__.load({
         autoRefresh: 'Scheduled refresh',
         injectLabel: 'Inject balances into context',
         injectHint: 'When on, enabled services’ balances are injected as the last system-prompt section (just before the user message). Volatile data sits at the very end, so a change only invalidates the tail of the prompt cache.',
+        injectNoteLabel: 'Guidance note',
+        injectNoteHint: 'When injection is on, this text is appended after the balance block to tell the agent how to choose between services. Clear it and save to fall back to the built-in wording.',
+        injectNoteSave: 'Save',
+        injectNoteSaved: 'Saved',
+        injectNoteReset: 'Reset to default',
+        injectNoteUnsaved: 'Unsaved',
         intervalLabel: 'Interval',
         intervalWarn: 'A 1-minute interval queries each provider very often and may hit their rate limits.',
         minutes: '{n} min',
@@ -232,6 +244,15 @@ window.__ModuleLoader__.load({
 /* 选中态圆钮同理:深色主题里轨道(品牌色)是白的,白色圆钮会消失。圆钮在选中态用 bg-base;
    关闭态轨道是中性灰,白色圆钮两种主题下都压得住。 */
 .dsm-switch[aria-checked="true"] > i{transform:translateX(15px);background:var(--dsw-alias-bg-base)}
+.dsm-guide{display:flex;flex-direction:column;gap:7px;margin:-2px 0 14px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}
+.dsm-guide-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;font-weight:600}
+.dsm-guide textarea{width:100%;box-sizing:border-box;min-height:72px;resize:vertical;font-family:inherit;font-size:12px;line-height:1.6;padding:7px 9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}
+.dsm-guide textarea:focus{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-1px}
+.dsm-guide-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsm-guide-hint{flex:1 1 200px;min-width:0;font-size:11.5px;color:var(--dsw-alias-label-secondary)}
+.dsm-guide-count{font-size:11.5px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}
+.dsm-guide-count--over{color:var(--dsw-alias-state-error-primary)}
+.dsm-guide-state{font-size:11.5px;color:var(--dsw-alias-label-secondary)}
 .dsm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(266px,1fr));gap:12px}
 .dsm-card{display:flex;flex-direction:column;gap:9px;min-width:0;padding:13px 14px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}
 .dsm-card--off{opacity:.6}
@@ -381,6 +402,9 @@ window.__ModuleLoader__.load({
       },
       async setInjectBalances(injectBalances) {
         store.applySnapshot(await post('/config', { injectBalances }))
+      },
+      async setInjectNote(injectNote) {
+        store.applySnapshot(await post('/config', { injectNote }))
       },
       async setServiceEnabled(id, enabled) {
         const current = store.data?.config?.services ?? []
@@ -759,6 +783,87 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * 注入开关打开时才出现:一段可以改的指导文案。
+     *
+     * 服务端只存「用户写过的那份」,没写过就是 null;界面显示的一直是**生效中**
+     * 的文本(写过就是那份,没写过就是内置默认),所以用户看到的和真正注入的
+     * 永远一致。清空后保存 = 回到默认。
+     */
+    function InjectNoteEditor({ data, disabled }) {
+      const saved = typeof data?.config?.injectNote === 'string' ? data.config.injectNote : null
+      const fallback = typeof data?.config?.injectNoteDefault === 'string' ? data.config.injectNoteDefault : ''
+      const max = Number.isFinite(data?.config?.injectNoteMaxLength) ? data.config.injectNoteMaxLength : 2000
+      const effective = saved === null ? fallback : saved
+      const [draft, setDraft] = useState(effective)
+      const [busy, setBusy] = useState(false)
+      const [savedAt, setSavedAt] = useState(0)
+
+      // 只在生效文本真的变了时覆盖草稿:轮询几秒一次,不能每次都冲掉用户正在打的字。
+      useEffect(() => {
+        setDraft(effective)
+      }, [effective])
+
+      const over = draft.length > max
+      const dirty = draft !== effective
+      const save = (value) => {
+        if (busy) return
+        setBusy(true)
+        void actions
+          .setInjectNote(value)
+          .then(() => setSavedAt(Date.now()))
+          .catch(() => {})
+          .then(() => setBusy(false))
+      }
+
+      return h(
+        'div',
+        { className: 'dsm-guide' },
+        h('div', { className: 'dsm-guide-head' }, t('injectNoteLabel')),
+        h('textarea', {
+          value: draft,
+          rows: 4,
+          spellCheck: false,
+          disabled: disabled || busy,
+          placeholder: fallback,
+          'aria-label': t('injectNoteLabel'),
+          onChange: (event) => setDraft(event.target.value),
+        }),
+        h(
+          'div',
+          { className: 'dsm-guide-actions' },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dsm-btn',
+              disabled: disabled || busy || !dirty || over,
+              onClick: () => save(draft),
+            },
+            t('injectNoteSave'),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dsm-btn dsm-btn--ghost',
+              disabled: disabled || busy || (saved === null && draft === fallback),
+              onClick: () => save(''),
+            },
+            t('injectNoteReset'),
+          ),
+          h('span', { className: 'dsm-guide-hint' }, t('injectNoteHint')),
+          h(
+            'span',
+            { className: over ? 'dsm-guide-count dsm-guide-count--over' : 'dsm-guide-count' },
+            `${draft.length} / ${max}`,
+          ),
+          dirty ? h('span', { className: 'dsm-guide-state' }, t('injectNoteUnsaved')) : null,
+          !dirty && savedAt > 0 ? h('span', { className: 'dsm-guide-state' }, t('injectNoteSaved')) : null,
+        ),
+      )
+    }
+
     function MonitorPage({ surface }) {
       const state = useStore()
       const data = state.data
@@ -808,6 +913,10 @@ window.__ModuleLoader__.load({
         )
       }
       if (data) content.push(h(Toolbar, { data, disabled: state.loading }))
+      // 只有开启注入时才需要这段说明 —— 关着的时候它注入不了,摆出来只会让人困惑。
+      if (data && data?.config?.injectBalances === true) {
+        content.push(h(InjectNoteEditor, { data, disabled: state.loading }))
+      }
 
       if (state.loading) {
         content.push(h('div', { className: 'dsm-note' }, t('loading')))

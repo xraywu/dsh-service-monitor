@@ -18,7 +18,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runInNewContext } from 'node:vm'
-import { PROMPT_SECTION_ORDER } from '../lib/constants.js'
+import { INJECT_NOTE_MAX_LENGTH, PROMPT_SECTION_ORDER } from '../lib/constants.js'
+import { normalizeInjectNote } from '../lib/config.js'
+import { message } from '../lib/messages.js'
 import { requireOk } from '../lib/net.js'
 import { buildBalancePromptText } from '../lib/prompt.js'
 import {
@@ -219,8 +221,61 @@ try {
   const injected = section.text({})
   check('injected text names the plugin block', injected.startsWith('## '), JSON.stringify(injected.slice(0, 40)))
   check('injected text lists an enabled service', /Tavily|博查|Bocha/.test(injected), JSON.stringify(injected))
-  check('injected text is one block per enabled service', injected.split('\n').length === 2 + 4, JSON.stringify(injected.split('\n').length))
+  const noteLines = message('en', 'promptNoteDefault').split('\n').length
+  check(
+    'injected text is one line per enabled service, plus the guidance note',
+    injected.split('\n').length === 2 + 4 + 1 + noteLines,
+    `${injected.split('\n').length} vs ${2 + 4 + 1 + noteLines}`,
+  )
   check('injected text never carries a key', !/tvly-|sk-|fc-/.test(injected))
+  check(
+    'the built-in guidance note is injected by default',
+    injected.includes(message('en', 'promptNoteDefault')),
+    JSON.stringify(injected.slice(-140)),
+  )
+  check('the balance block still comes first', injected.indexOf('- ') < injected.indexOf('1. '), JSON.stringify(injected.slice(-140)))
+
+  const noteSaved = await post('/config', { injectNote: '  Prefer Tavily while it has credit.  ' })
+  const noteSavedBody = await noteSaved.json()
+  check(
+    'a guidance note is accepted and trimmed',
+    noteSavedBody.config.injectNote === 'Prefer Tavily while it has credit.',
+    JSON.stringify(noteSavedBody.config.injectNote),
+  )
+  check(
+    'the injected text picks the custom note up',
+    promptSections[0].text({}).endsWith('Prefer Tavily while it has credit.'),
+    JSON.stringify(promptSections[0].text({}).slice(-80)),
+  )
+  check(
+    'state exposes the built-in default for the text box',
+    typeof noteSavedBody.config.injectNoteDefault === 'string' && noteSavedBody.config.injectNoteDefault.length > 0,
+  )
+  check(
+    'state exposes the length limit',
+    noteSavedBody.config.injectNoteMaxLength === INJECT_NOTE_MAX_LENGTH,
+    String(noteSavedBody.config.injectNoteMaxLength),
+  )
+  const noteBadType = await post('/config', { injectNote: 42 })
+  check('a non-string note is rejected with 400', noteBadType.status === 400, `got ${noteBadType.status}`)
+  const noteTooLong = await post('/config', { injectNote: 'x'.repeat(INJECT_NOTE_MAX_LENGTH + 1) })
+  check('an over-long note is rejected with 400', noteTooLong.status === 400, `got ${noteTooLong.status}`)
+  const noteCleared = await post('/config', { injectNote: '   ' })
+  const noteClearedBody = await noteCleared.json()
+  check(
+    'a blank note falls back to null (= built-in default)',
+    noteClearedBody.config.injectNote === null,
+    JSON.stringify(noteClearedBody.config.injectNote),
+  )
+  check(
+    'the injected text is back to the built-in wording',
+    promptSections[0].text({}).includes(message('en', 'promptNoteDefault').split('\n')[0]),
+    JSON.stringify(promptSections[0].text({}).slice(-120)),
+  )
+  check('normalization trims, drops empties and drops over-long notes', normalizeInjectNote('  hi  ') === 'hi')
+  check('a blank note normalizes to null', normalizeInjectNote('   ') === null)
+  check('an over-long note normalizes to null', normalizeInjectNote('x'.repeat(INJECT_NOTE_MAX_LENGTH + 1)) === null)
+  check('a non-string note normalizes to null', normalizeInjectNote(42) === null)
 
   const offAgain = await post('/config', { injectBalances: false })
   check('toggle off is accepted', (await offAgain.json()).config.injectBalances === false)
@@ -601,7 +656,15 @@ try {
       tavily: { status: 'error', code: 'unauthorized', message: 'API key is invalid or expired (HTTP 401)', httpStatus: 401, fetchedAt: '2026-10-06T02:34:41Z' },
     },
     refreshing: ['firecrawl'],
-    config: { intervalMinutes: 1, autoRefresh: true, injectBalances: true, services: ['bocha', 'firecrawl'] },
+    config: {
+      intervalMinutes: 1,
+      autoRefresh: true,
+      injectBalances: true,
+      injectNote: 'Prefer Bocha while it still has credit.',
+      injectNoteDefault: 'built-in guidance',
+      injectNoteMaxLength: 2000,
+      services: ['bocha', 'firecrawl'],
+    },
     intervalChoices: [1, 5, 10, 30],
     lastRefreshAt: '2026-10-06T02:34:41Z',
     nextRefreshAt: '2026-10-06T02:35:41Z',
