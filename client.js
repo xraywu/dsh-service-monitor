@@ -786,9 +786,9 @@ window.__ModuleLoader__.load({
     /**
      * 注入开关打开时才出现:一段可以改的指导文案。
      *
-     * 服务端只存「用户写过的那份」,没写过就是 null;界面显示的一直是**生效中**
-     * 的文本(写过就是那份,没写过就是内置默认),所以用户看到的和真正注入的
-     * 永远一致。清空后保存 = 回到默认。
+     * 服务端只存「用户写过的那份」,没写过就是 null。没写过时框里留空、把内置
+     * 默认文案当 placeholder 显示 —— 既让人一眼看出此刻用的是默认,也不会让人
+     * 以为那段话是自己写的。清空后保存 = 回到默认。
      */
     function InjectNoteEditor({ data, disabled }) {
       const saved = typeof data?.config?.injectNote === 'string' ? data.config.injectNote : null
@@ -850,7 +850,12 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'dsm-btn dsm-btn--ghost',
               disabled: disabled || busy || (saved === null && draft.length === 0),
-              onClick: () => save(''),
+              // 本地先清空:未写过时服务端状态本来就是 null,只回包不会改变
+              // effective,useEffect 也就不会重跑,草稿会赖在框里。
+              onClick: () => {
+                setDraft('')
+                save('')
+              },
             },
             t('injectNoteReset'),
           ),
