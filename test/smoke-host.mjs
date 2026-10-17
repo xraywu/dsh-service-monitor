@@ -90,6 +90,13 @@ const systemPrompt = {
     }
   },
 }
+/** Host settings service stub: the plugin reads `locale.preference` from it. */
+let localePreference
+const settings = {
+  describe() {
+    return [{ ns: 'locale', value: { preference: localePreference } }]
+  },
+}
 const ctx = {
   logger: { info: (...a) => console.log('  [host]', ...a), warn: (...a) => console.log('  [host:warn]', ...a) },
   effect(callback, label) {
@@ -97,8 +104,8 @@ const ctx = {
     disposers.push({ label, disposer })
     return disposer
   },
-  get() {
-    return undefined
+  get(name) {
+    return name === 'settings' ? settings : undefined
   },
   /** Nested inject, the way the plugin asks for the optional systemPrompt service. */
   inject(services, callback) {
@@ -193,6 +200,19 @@ try {
   check('invalid interval rejected with 400', badInterval.status === 400, `got ${badInterval.status}`)
   const badService = await post('/config', { services: ['nope'] })
   check('unknown service rejected with 400', badService.status === 400, `got ${badService.status}`)
+
+  console.log('\n== host language (locale.preference) ==')
+  const enMessage = (await (await post('/config', { intervalMinutes: 7 })).json()).error
+  check('no stored preference → English host text', enMessage === 'Refresh interval must be 1, 5, 10 or 30 minutes', enMessage)
+  localePreference = 'zh'
+  const zhMessage = (await (await post('/config', { intervalMinutes: 7 })).json()).error
+  check('stored preference zh → Chinese host text', zhMessage === '刷新间隔只能是 1、5、10、30 分钟', zhMessage)
+  localePreference = 'zh-CN'
+  const regionMessage = (await (await post('/config', { intervalMinutes: 7 })).json()).error
+  check('region-tagged preference zh-CN still Chinese', regionMessage === '刷新间隔只能是 1、5、10、30 分钟', regionMessage)
+  localePreference = 'en'
+  const backToEnglish = (await (await post('/config', { intervalMinutes: 7 })).json()).error
+  check('stored preference en → back to English', backToEnglish === 'Refresh interval must be 1, 5, 10 or 30 minutes', backToEnglish)
   const oneService = await post('/config', { services: ['tavily'] })
   const oneServiceBody = await oneService.json()
   check('service list narrowed to tavily', JSON.stringify(oneServiceBody.config.services) === '["tavily"]')
@@ -329,6 +349,39 @@ try {
   check('zh heading rendered', zhText.startsWith('## 第三方服务余额'), JSON.stringify(zhText))
   check('zh meta falls back to "no reading yet"', zhText.includes('尚未取到数据'), zhText)
   check('unconfigured service is listed', zhText.includes('未配置 API Key'), zhText)
+
+  const textWithReset = buildBalancePromptText({
+    lang: 'en',
+    intervalMinutes: 10,
+    lastRefreshAt: '2026-10-06T02:34:41Z',
+    providers,
+    results: {
+      serpapi: { status: 'ok', remaining: 557, total: 1000, resetsAt: '2026-11-01T00:00:00Z' },
+    },
+  })
+  check('resetsAt is injected when available (en)', textWithReset.includes('- SerpAPI: 557 / 1000 requests remaining (resets on 2026-11-01)'), textWithReset)
+
+  const zhTextWithReset = buildBalancePromptText({
+    lang: 'zh',
+    intervalMinutes: 10,
+    lastRefreshAt: '2026-10-06T02:34:41Z',
+    providers,
+    results: {
+      serpapi: { status: 'ok', remaining: 557, total: 1000, resetsAt: '2026-11-01T00:00:00Z' },
+    },
+  })
+  check('resetsAt is injected when available (zh)', zhTextWithReset.includes('- SerpAPI: 剩余 557 / 1000 次 (重置时间: 2026-11-01)'), zhTextWithReset)
+
+  const depletedWithReset = buildBalancePromptText({
+    lang: 'en',
+    intervalMinutes: 10,
+    lastRefreshAt: '2026-10-06T02:34:41Z',
+    providers,
+    results: {
+      serpapi: { status: 'ok', remaining: 0, total: 1000, resetsAt: '2026-11-01T00:00:00Z' },
+    },
+  })
+  check('depleted with resetsAt combines tags (en)', depletedWithReset.includes('- SerpAPI: 0 / 1000 requests remaining (depleted · resets on 2026-11-01)'), depletedWithReset)
 
   console.log('\n== POST /key ==')
   const shortKey = await post('/key', { service: 'tavily', key: 'x'.repeat(600) })

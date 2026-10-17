@@ -1,5 +1,7 @@
 # dsh-service-monitor
 
+[English](README_EN.md) | [简体中文](README.md)
+
 DeepSeek Harness 插件：监控 AI Agent 常用第三方服务的**剩余余额 / 额度**。
 
 - 服务：**Tavily**、**博查 Bocha**、**Firecrawl**、**SerpAPI**、**TinyFish**
@@ -19,6 +21,8 @@ DeepSeek Harness 插件：监控 AI Agent 常用第三方服务的**剩余余额
 ```
 dsh plugin add dsh-service-monitor
 ```
+
+需要 DSH **0.2.1-rc.2** 或更高的 0.2.x 版本（`package.json` 的 `engines.dsh` = `>=0.2.1-rc.2 <0.3.0-0`，本版本在 0.2.1-rc.2 上验证通过；更早的 0.1.5 线未做兼容承诺）。
 
 装好后：侧边栏出现「服务余额」图标，设置里出现「服务余额监控」页。首次进入所有服务都是「尚未配置 API Key」。
 
@@ -44,7 +48,7 @@ dsh plugin add dsh-service-monitor
 (refreshed every 10 min · as of 10:34:41)
 - Tavily: 14500 / 15000 credits remaining
 - Bocha: ¥0.00 remaining (depleted)
-- SerpAPI: query failed — API key is invalid or expired (HTTP 401)
+- SerpAPI: 557 / 1000 requests remaining (resets on 2026-11-01)
 
 调用外部检索/抓取服务前，先参考上面的余额：
 1. …（见下方「补充说明」）
@@ -69,6 +73,8 @@ dsh plugin add dsh-service-monitor
 - **保持缓存：** 相关提示词注入在所有系统提示词之后、用户消息之前，以避免动态查询的结果影响**提示词缓存**。
 - **只注入已启用的服务**：只会对开启了监控的服务进行注入
 - **余额 ≤ 0 标注「已耗尽」**：以确保 Agent 不会调用 Credit 已经耗尽的服务。
+- **同步注入重置时间（如有）**：若服务提供了重置时间（如 SerpAPI），会自动标注在行末（如 `(重置时间: 2026-11-01)` / `(resets on 2026-11-01)`），配合指导原则第 2 条供 Agent 优先消耗临期额度。
+- **注入语言跟随设置**：注入块与宿主侧文案（如报错信息）的语言取「设置 → 常规」里**显式选择**的界面语言（持久化为 `locale.preference`）；从没选过时，浏览器会按系统语言自动显示界面，但宿主读不到这个自动选择，此时注入块用英文。
 
 
 ## API Key 存放是否安全？

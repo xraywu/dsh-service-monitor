@@ -43,13 +43,33 @@ export function apply(ctx, bootConfig = {}) {
       .map((h) => h.toLowerCase()),
   )
 
-  const lang = () => {
+  // 宿主侧没有 `locale` 服务：locale 是浏览器半边的插件，宿主只持久化偏好。
+  // 用户显式选过界面语言时，它落在宿主 settings 服务的 `locale.preference`
+  // （`$DSH_HOME/cordis.patch.yml` 的 `- id: locale` 行）；没选过时浏览器按
+  // navigator 自动挑语言，宿主读不到，退回英文。任意一步失败都退回 `en`。
+  const LOCALE_SETTINGS_NS = 'locale'
+  const LOCALE_PREFERENCE_FIELD = 'preference'
+
+  const readLocalePreference = () => {
     try {
-      const active = ctx.get('locale')?.getSnapshot?.().active
-      return typeof active === 'string' && active.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+      const settings = ctx.get?.('settings')
+      if (!settings || typeof settings.describe !== 'function') return undefined
+      const rows = settings.describe()
+      if (!Array.isArray(rows)) return undefined
+      const row =
+        rows.find((entry) => entry?.ns === LOCALE_SETTINGS_NS) ??
+        rows.find((entry) => typeof entry?.ns === 'string' && entry.ns.endsWith(`/${LOCALE_SETTINGS_NS}`))
+      const preference = row?.value?.[LOCALE_PREFERENCE_FIELD]
+      return typeof preference === 'string' ? preference : undefined
     } catch {
-      return 'en'
+      return undefined
     }
+  }
+
+  /** @returns {'zh' | 'en'} 宿主文案与提示词注入使用的语言。 */
+  const lang = () => {
+    const preference = readLocalePreference()
+    return typeof preference === 'string' && preference.toLowerCase().startsWith('zh') ? 'zh' : 'en'
   }
   const msg = (key, params = {}) => message(lang(), key, params)
 
