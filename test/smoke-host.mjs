@@ -201,18 +201,28 @@ try {
   const badService = await post('/config', { services: ['nope'] })
   check('unknown service rejected with 400', badService.status === 400, `got ${badService.status}`)
 
-  console.log('\n== host language (locale.preference) ==')
+  console.log('\n== host language (locale.preference & client query) ==')
+  localePreference = 'en'
   const enMessage = (await (await post('/config', { intervalMinutes: 7 })).json()).error
-  check('no stored preference → English host text', enMessage === 'Refresh interval must be 1, 5, 10 or 30 minutes', enMessage)
+  check('stored preference en → English host text', enMessage === 'Refresh interval must be 1, 5, 10 or 30 minutes', enMessage)
   localePreference = 'zh'
   const zhMessage = (await (await post('/config', { intervalMinutes: 7 })).json()).error
   check('stored preference zh → Chinese host text', zhMessage === '刷新间隔只能是 1、5、10、30 分钟', zhMessage)
   localePreference = 'zh-CN'
   const regionMessage = (await (await post('/config', { intervalMinutes: 7 })).json()).error
   check('region-tagged preference zh-CN still Chinese', regionMessage === '刷新间隔只能是 1、5、10、30 分钟', regionMessage)
-  localePreference = 'en'
-  const backToEnglish = (await (await post('/config', { intervalMinutes: 7 })).json()).error
-  check('stored preference en → back to English', backToEnglish === 'Refresh interval must be 1, 5, 10 or 30 minutes', backToEnglish)
+  localePreference = undefined
+  // client query param ?lang=en / ?lang=zh
+  const queryEn = await get('/state?lang=en')
+  check('client query ?lang=en accepted', queryEn.status === 200)
+  const queryEnMsg = (await (await post('/config', { intervalMinutes: 7 })).json()).error
+  check('client query en switches host text to English', queryEnMsg === 'Refresh interval must be 1, 5, 10 or 30 minutes', queryEnMsg)
+  const queryZh = await get('/state?lang=zh')
+  check('client query ?lang=zh accepted', queryZh.status === 200)
+  const queryZhMsg = (await (await post('/config', { intervalMinutes: 7 })).json()).error
+  check('client query zh switches host text to Chinese', queryZhMsg === '刷新间隔只能是 1、5、10、30 分钟', queryZhMsg)
+  // restore to en for subsequent test assertions that expect English
+  await get('/state?lang=en')
   const oneService = await post('/config', { services: ['tavily'] })
   const oneServiceBody = await oneService.json()
   check('service list narrowed to tavily', JSON.stringify(oneServiceBody.config.services) === '["tavily"]')

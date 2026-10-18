@@ -107,10 +107,25 @@ window.__ModuleLoader__.load({
         accountEmail: '账号',
         currency: '币种',
         giftBalance: '赠送余额',
+        injectNoteDefault:
+          '调用外部检索/抓取服务前，先参考上面的余额：\n' +
+          '1. 同一个目的有多个服务可用时，优先选剩余额度更充裕的那个，让各服务的额度均衡消耗，避免任何一项被提前用尽。\n' +
+          '2. 某项服务有「重置时间」且即将重置、当前仍有剩余时，可以优先消耗它的额度（重置前的剩余不用就浪费了）。\n' +
+          '3. 余额为 0 或已耗尽的服务不要调用，改用其它可用服务。',
+        errUnauthorized: 'API Key 无效或已过期 (HTTP {status})',
+        errForbidden: '该 API Key 无权访问余额接口 (HTTP {status})',
+        errNoCredits: '额度已用尽 (HTTP 402)',
+        errRateLimited: '请求过于频繁 (HTTP 429)，请稍后重试',
+        errHttp: '接口返回 HTTP {status}',
+        errTimeout: '请求超时',
+        errDnsFailed: '域名解析失败',
+        errUnreachable: '服务不可达或连接被拒绝',
+        errNetwork: '网络请求失败',
+        errParse: '响应解析失败',
       },
       en: {
         panelTitle: 'Service balances',
-        panelSubtitle: 'Remaining quota for Tavily, Bocha, Firecrawl and SerpAPI, refreshed on your schedule.',
+        panelSubtitle: 'Remaining quota for AI agent external services, refreshed on your schedule.',
         sidebarLabel: 'Service balances',
         refreshNow: 'Refresh now',
         refreshing: 'Querying…',
@@ -159,7 +174,7 @@ window.__ModuleLoader__.load({
         emptyTitle: 'No service enabled yet',
         emptyHint: 'Enable at least one service below, then paste its API key.',
         availableTitle: 'Available services',
-        allEnabled: 'All four services are enabled.',
+        allEnabled: 'All services are enabled.',
         loadError: 'Cannot reach the plugin backend: {message}',
         retry: 'Retry',
         unitCredits: 'credits',
@@ -188,6 +203,21 @@ window.__ModuleLoader__.load({
         accountEmail: 'Account',
         currency: 'Currency',
         giftBalance: 'Gift balance',
+        injectNoteDefault:
+          'Before calling an external search or scraping service, check the balances above:\n' +
+          '1. When several services can serve the same purpose, prefer the one with more headroom, so that every quota is consumed evenly and none of them runs out early.\n' +
+          '2. If a service has a "resets on" time that is close and still has credit left, prefer it — the leftover credit is wasted at the reset.\n' +
+          '3. Do not call a service whose balance is 0 or depleted; use another available service instead.',
+        errUnauthorized: 'API key is invalid or expired (HTTP {status})',
+        errForbidden: 'API key is not authorized for usage endpoint (HTTP {status})',
+        errNoCredits: 'Credits exhausted (HTTP 402)',
+        errRateLimited: 'Rate limited (HTTP 429), please try again later',
+        errHttp: 'Endpoint returned HTTP {status}',
+        errTimeout: 'Request timed out',
+        errDnsFailed: 'DNS resolution failed',
+        errUnreachable: 'Service unreachable or connection refused',
+        errNetwork: 'Network request failed',
+        errParse: 'Failed to parse response',
       },
     }
 
@@ -197,6 +227,10 @@ window.__ModuleLoader__.load({
     let activeLang = 'en'
     const detectLang = () => {
       try {
+        const docLang = String(typeof document !== 'undefined' && document.documentElement?.lang ? document.documentElement.lang : '').toLowerCase()
+        if (docLang.length > 0) return docLang.startsWith('zh') ? 'zh' : 'en'
+      } catch {}
+      try {
         const id = String(navigator.language || navigator.userLanguage || 'en').toLowerCase()
         return id.startsWith('zh') ? 'zh' : 'en'
       } catch {
@@ -204,6 +238,27 @@ window.__ModuleLoader__.load({
       }
     }
     let t = (key, params) => interpolate((DICT[activeLang] ?? DICT.en)[key] ?? DICT.en[key] ?? key, params)
+
+    const resolveKeyHint = (hint, lang) => {
+      if (!hint) return null
+      if (typeof hint === 'object') return (lang === 'zh' ? hint.zh : hint.en) ?? hint.en ?? hint.zh ?? null
+      return String(hint)
+    }
+
+    const formatErrorCode = (code, httpStatus, fallbackMessage) => {
+      if (!code && !fallbackMessage) return t('noData')
+      if (code === 'unauthorized') return t('errUnauthorized', { status: httpStatus ?? '?' })
+      if (code === 'forbidden') return t('errForbidden', { status: httpStatus ?? '?' })
+      if (code === 'no-credits') return t('errNoCredits', { status: httpStatus ?? '402' })
+      if (code === 'rate-limited') return t('errRateLimited', { status: httpStatus ?? '429' })
+      if (code === 'http') return t('errHttp', { status: httpStatus ?? '?' })
+      if (code === 'timeout') return t('errTimeout')
+      if (code === 'dns') return t('errDnsFailed')
+      if (code === 'unreachable') return t('errUnreachable')
+      if (code === 'network') return t('errNetwork')
+      if (code === 'parse') return t('errParse')
+      return fallbackMessage ?? t('noData')
+    }
 
     // ── 样式(仅用 --dsw-alias-* 主题令牌) ────────────────────────────────
 
@@ -354,7 +409,7 @@ window.__ModuleLoader__.load({
         if (this.inflightFetch) return
         this.inflightFetch = true
         try {
-          const res = await fetch(`${API}/state`, { headers: { accept: 'application/json' } })
+          const res = await fetch(`${API}/state?lang=${encodeURIComponent(activeLang)}`, { headers: { accept: 'application/json' } })
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           this.data = await res.json()
           this.error = null
@@ -381,7 +436,7 @@ window.__ModuleLoader__.load({
       const res = await fetch(`${API}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body ?? {}),
+        body: JSON.stringify({ ...(body ?? {}), lang: activeLang }),
       })
       let payload = null
       try {
@@ -543,10 +598,11 @@ window.__ModuleLoader__.load({
       }, [open])
 
       const configured = provider.keySource !== null && provider.keySource !== undefined
+      const hintText = resolveKeyHint(provider.keyHint, activeLang)
 
       const submit = async () => {
         if (draft.trim().length === 0) {
-          setError(provider.keyHint ? t('keyPlaceholder', { hint: provider.keyHint }) : t('keyPlaceholderPlain'))
+          setError(hintText ? t('keyPlaceholder', { hint: hintText }) : t('keyPlaceholderPlain'))
           return
         }
         setBusy(true)
@@ -615,7 +671,7 @@ window.__ModuleLoader__.load({
               type: 'password',
               autoComplete: 'off',
               spellCheck: false,
-              placeholder: provider.keyHint ? t('keyPlaceholder', { hint: provider.keyHint }) : t('keyPlaceholderPlain'),
+              placeholder: hintText ? t('keyPlaceholder', { hint: hintText }) : t('keyPlaceholderPlain'),
               value: draft,
               disabled: busy,
               onChange: (event) => setDraft(event.target.value),
@@ -669,11 +725,12 @@ window.__ModuleLoader__.load({
       } else if (!ok && result && result.status === 'unconfigured') {
         body = h('div', { className: 'dsm-sub2' }, t('unconfigured'))
       } else if (!ok && result) {
-        body = h('div', { className: 'dsm-err' }, result.message ?? t('noData'))
+        body = h('div', { className: 'dsm-err' }, formatErrorCode(result.code, result.httpStatus, result.message))
       } else if (!ok) {
         body = h('div', { className: 'dsm-sub2' }, t('loading'))
       }
 
+      const cardLabel = activeLang === 'zh' ? provider.label.zh : provider.label.en
       return h(
         'div',
         { className: `dsm-card${result && result.status === 'unconfigured' ? ' dsm-card--off' : ''}` },
@@ -681,7 +738,7 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'dsm-card-head' },
           h(Dot, { status }),
-          h('span', { className: 'dsm-card-name', title: provider.label.zh + ' / ' + provider.label.en }, activeLang === 'zh' ? provider.label.zh : provider.label.en),
+          h('span', { className: 'dsm-card-name', title: cardLabel }, cardLabel),
           h(
             'button',
             {
@@ -718,7 +775,7 @@ window.__ModuleLoader__.load({
             )
           : body,
         result && result.stale === true
-          ? h('div', { className: 'dsm-note' }, t('staleNote') + ' ' + (result.lastError ?? ''))
+          ? h('div', { className: 'dsm-note' }, t('staleNote') + ' ' + (formatErrorCode(result.lastErrorCode, null, result.lastError) || ''))
           : null,
         meta.length > 0 ? h('div', { className: 'dsm-meta' }, meta) : null,
         ok ? h('div', { className: 'dsm-note' }, t('updatedAt', { time: timeText(result.fetchedAt) })) : null,
@@ -792,7 +849,7 @@ window.__ModuleLoader__.load({
      */
     function InjectNoteEditor({ data, disabled }) {
       const saved = typeof data?.config?.injectNote === 'string' ? data.config.injectNote : null
-      const fallback = typeof data?.config?.injectNoteDefault === 'string' ? data.config.injectNoteDefault : ''
+      const fallback = t('injectNoteDefault') || (typeof data?.config?.injectNoteDefault === 'string' ? data.config.injectNoteDefault : '')
       const max = Number.isFinite(data?.config?.injectNoteMaxLength) ? data.config.injectNoteMaxLength : 2000
       // 没写过就是空框 + 默认文案当 placeholder:让「用默认」和「改过」在界面上
       // 一眼可分,也免得用户以为框里那段是自己写的而不敢动。
@@ -1040,24 +1097,35 @@ window.__ModuleLoader__.load({
       // 整个消失」正是这类代码出错的两种典型后果。
       __internals: { statusOf, remainingRatio, formatAmount, formatDate, store },
       apply(ctx) {
-        // 语言:优先走宿主的 locale 服务(dsh-client-locale);拿不到就退回内置字典。
+        // 语言:优先走宿主的 locale 服务(dsh-client-locale);拿不到就退回内置字典与 DOM 检测。
         let locale = undefined
-        try {
-          locale = ctx.get('locale')
-        } catch {
-          locale = undefined
+
+        const readLang = () => {
+          try {
+            const loc = locale ?? ctx.get?.('locale')
+            const snapshot = loc && typeof loc.getSnapshot === 'function' ? loc.getSnapshot() : null
+            const id = String(snapshot && snapshot.active ? snapshot.active : '').toLowerCase()
+            if (id.length > 0) return id.startsWith('zh') ? 'zh' : 'en'
+          } catch {}
+          try {
+            const docLang = String(typeof document !== 'undefined' && document.documentElement?.lang ? document.documentElement.lang : '').toLowerCase()
+            if (docLang.length > 0) return docLang.startsWith('zh') ? 'zh' : 'en'
+          } catch {}
+          return detectLang()
         }
-        if (locale && typeof locale.register === 'function' && typeof locale.bind === 'function') {
+
+        const setupLocale = (loc) => {
+          if (!loc || typeof loc.register !== 'function' || typeof loc.bind !== 'function') return
           try {
             ctx.effect(() => {
-              const offZh = locale.register(NS, 'zh', DICT.zh)
-              const offEn = locale.register(NS, 'en', DICT.en)
+              const offZh = loc.register(NS, 'zh', DICT.zh)
+              const offEn = loc.register(NS, 'en', DICT.en)
               return () => {
                 if (typeof offZh === 'function') offZh()
                 if (typeof offEn === 'function') offEn()
               }
             }, 'service-monitor: dictionaries')
-            const bound = locale.bind(NS)
+            const bound = loc.bind(NS)
             t = (key, params) => {
               try {
                 const value = bound(key, params)
@@ -1071,29 +1139,62 @@ window.__ModuleLoader__.load({
           } catch (error) {
             console.warn('[service-monitor] locale service unusable, using the built-in dictionary', error)
           }
-        }
-        const readLang = () => {
-          try {
-            const snapshot = locale && typeof locale.getSnapshot === 'function' ? locale.getSnapshot() : null
-            const id = String(snapshot && snapshot.active ? snapshot.active : '').toLowerCase()
-            return id.length > 0 ? (id.startsWith('zh') ? 'zh' : 'en') : detectLang()
-          } catch {
-            return detectLang()
+          if (typeof loc.subscribe === 'function') {
+            ctx.effect(
+              () =>
+                loc.subscribe(() => {
+                  const next = readLang()
+                  if (next !== activeLang) {
+                    activeLang = next
+                    store.emit()
+                  }
+                }),
+              'service-monitor: locale sync',
+            )
           }
         }
+
+        try {
+          locale = ctx.get?.('locale')
+          if (locale) setupLocale(locale)
+        } catch {}
+
+        if (typeof ctx.inject === 'function') {
+          try {
+            ctx.inject(['locale'], (scoped) => {
+              const scopedLocale = scoped?.locale ?? ctx.get?.('locale')
+              if (scopedLocale && scopedLocale !== locale) {
+                locale = scopedLocale
+                setupLocale(locale)
+              }
+              const next = readLang()
+              if (next !== activeLang) {
+                activeLang = next
+                store.emit()
+              }
+            })
+          } catch {}
+        }
+
         activeLang = readLang()
-        if (locale && typeof locale.subscribe === 'function') {
-          ctx.effect(
-            () =>
-              locale.subscribe(() => {
-                const next = readLang()
-                if (next !== activeLang) {
-                  activeLang = next
-                  store.emit()
+
+        // 监听 document.documentElement.lang 的变化（DSH 切换语言时会修改该属性）
+        if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined' && document.documentElement) {
+          try {
+            const observer = new MutationObserver((mutations) => {
+              for (const m of mutations) {
+                if (m.type === 'attributes' && m.attributeName === 'lang') {
+                  const next = readLang()
+                  if (next !== activeLang) {
+                    activeLang = next
+                    store.emit()
+                  }
                 }
-              }),
-            'service-monitor: locale sync',
-          )
+              }
+            })
+            observer.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
+            ctx.effect(() => () => observer.disconnect(), 'service-monitor: html-lang-observer')
+          } catch {}
         }
 
         // 主面板看板,与侧边栏图标同 id,外壳点选即切换。

@@ -44,9 +44,10 @@ export function apply(ctx, bootConfig = {}) {
   )
 
   // 宿主侧没有 `locale` 服务：locale 是浏览器半边的插件，宿主只持久化偏好。
-  // 用户显式选过界面语言时，它落在宿主 settings 服务的 `locale.preference`
-  // （`$DSH_HOME/cordis.patch.yml` 的 `- id: locale` 行）；没选过时浏览器按
-  // navigator 自动挑语言，宿主读不到，退回英文。任意一步失败都退回 `en`。
+  // 语言决策优先级：
+  // 1. 用户显式选过界面语言时，读取宿主 settings 服务的 `locale.preference`（优先）；
+  // 2. 前端客户端上报的当前活动语言（Web 页面交互时上报）；
+  // 3. 宿主系统的本地化语言环境（Intl / process.env.LANG，在中文系统下默认使用中文）。
   const LOCALE_SETTINGS_NS = 'locale'
   const LOCALE_PREFERENCE_FIELD = 'preference'
 
@@ -66,12 +67,42 @@ export function apply(ctx, bootConfig = {}) {
     }
   }
 
+  const detectSystemZh = () => {
+    try {
+      const loc = Intl.DateTimeFormat().resolvedOptions().locale
+      if (typeof loc === 'string' && loc.toLowerCase().startsWith('zh')) return true
+    } catch {}
+    try {
+      const env = process.env.LANG || process.env.LC_ALL || process.env.LANGUAGE
+      if (typeof env === 'string' && env.toLowerCase().startsWith('zh')) return true
+    } catch {}
+    return false
+  }
+
+  let clientLang = undefined
+
   /** @returns {'zh' | 'en'} 宿主文案与提示词注入使用的语言。 */
   const lang = () => {
     const preference = readLocalePreference()
-    return typeof preference === 'string' && preference.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+    if (typeof preference === 'string' && preference.length > 0) {
+      return preference.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+    }
+    if (clientLang === 'zh' || clientLang === 'en') {
+      return clientLang
+    }
+    return detectSystemZh() ? 'zh' : 'en'
   }
   const msg = (key, params = {}) => message(lang(), key, params)
+
+  const onClientLang = (nextLang) => {
+    if (typeof nextLang === 'string') {
+      const normalized = nextLang.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+      if (clientLang !== normalized) {
+        clientLang = normalized
+        promptSection?.sync?.()
+      }
+    }
+  }
 
   // ── 接线 ──────────────────────────────────────────────────────────────────
   //
@@ -81,7 +112,7 @@ export function apply(ctx, bootConfig = {}) {
   const credentials = createCredentials({ ctx, store, warn, msg })
   const refresher = createRefresher({ store, credentials, warn, msg })
   const promptSection = createPromptSection({ ctx, store, lang, warn })
-  const handler = createApiHandler({ store, credentials, refresher, promptSection, msg, trustedHosts, warn })
+  const handler = createApiHandler({ store, credentials, refresher, promptSection, msg, trustedHosts, onClientLang, warn })
 
   let startupTimer = null
 
