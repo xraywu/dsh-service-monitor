@@ -4,7 +4,7 @@
 
 DeepSeek Harness 插件：监控 AI Agent 常用第三方服务的**剩余余额 / 额度**。
 
-- 服务：**Tavily**、**博查 Bocha**、**Firecrawl**、**SerpAPI**、**TinyFish**
+- 服务：**Tavily**、**博查 Bocha**、**Firecrawl**、**SerpAPI**、**SearchApi**、**ScrapingBee**、**ScraperAPI**、**TinyFish**
 - 自选服务、逐个录入 API Key
 - 定时刷新：**1 / 5 / 10 / 30 分钟**，也可随时手动刷新
 - 展示面：**主面板看板**（侧边栏图标点选）+ **侧边栏状态图标**（带健康状态圆点）+ **设置 → 服务余额监控**（同一页，便于填 Key）
@@ -98,6 +98,9 @@ API Key **永远不会**通过 HTTP 接口回传给页面：`/state` 只返回�
 | 博查 | `GET https://api.bocha.cn/v1/fund/remaining` | `Authorization: Bearer` | `data.remaining` |
 | Firecrawl | `GET https://api.firecrawl.dev/v2/team/credit-usage`（v1 回落到 `/v1/…`） | `Authorization: Bearer` | `remainingCredits` / `planCredits` |
 | SerpAPI | `GET https://serpapi.com/account.json?api_key=…` | query 参数 | `total_searches_left`、`plan_searches_left`、`searches_per_month` |
+| SearchApi | `GET https://www.searchapi.io/api/v1/me` | `Authorization: Bearer` | `account.remaining_credits`、`account.monthly_allowance` |
+| ScrapingBee | `GET https://app.scrapingbee.com/api/v1/usage` | `Authorization: Bearer` | `max_api_credit`、`used_api_credit`、`renewal_subscription_date` |
+| ScraperAPI | `GET https://api.scraperapi.com/account?api_key=…` | query 参数 | `requestLimit - requestCount`、`concurrencyLimit` |
 | TinyFish | `GET https://agent.tinyfish.ai/v1/wallet` | `X-API-Key` | `available_balance`、`currency` |
 
 > **关于 Firecrawl 的「重置时间」**：Firecrawl 的账单接口**没有任何额度重置字段**。v2 OpenAPI 里 `/team/credit-usage` 只有 `remainingCredits` / `planCredits` / `billingPeriodStart` / `billingPeriodEnd`，`/team/token-usage` 同样只有计费周期起止，`/team/credit-usage/historical` 只有 `startDate` / `endDate` / `totalCredits`。年付套餐的 `billingPeriodEnd` 是套餐到期日，与「每月额度重置」不是一回事 —— 所以卡片显示的是**计费周期起止**，而不是一个被标错成「重置时间」的日期。
@@ -115,7 +118,7 @@ API Key **永远不会**通过 HTTP 接口回传给页面：`/state` 只返回�
       name: dsh-service-monitor
       config:
         intervalMinutes: 10          # 1 | 5 | 10 | 30,其它值回落 10
-        services: [tavily, bocha, firecrawl, serpapi, tinyfish]
+        services: [tavily, bocha, firecrawl, serpapi, searchapi, scrapingbee, scraperapi, tinyfish]
         autoRefresh: true
         trustedHosts: []             # 额外允许的 Host 头(反代场景)
 ```

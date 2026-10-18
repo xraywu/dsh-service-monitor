@@ -26,6 +26,9 @@ import { buildBalancePromptText } from '../lib/prompt.js'
 import {
   normalizeBocha,
   normalizeFirecrawl,
+  normalizeScraperapi,
+  normalizeScrapingbee,
+  normalizeSearchapi,
   normalizeSerpapi,
   normalizeTavily,
   normalizeTinyfish,
@@ -126,7 +129,7 @@ const ctx = {
 }
 
 const plugin = await import(pathToFileURL(join(root, 'index.js')).href)
-plugin.apply(ctx, { intervalMinutes: 5, services: ['tavily', 'bocha', 'firecrawl', 'serpapi'], trustedHosts: ['monitor.test'] })
+plugin.apply(ctx, { intervalMinutes: 5, services: ['tavily', 'bocha', 'firecrawl', 'serpapi', 'searchapi', 'scrapingbee', 'scraperapi'], trustedHosts: ['monitor.test'] })
 
 const server = http.createServer((req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname
@@ -176,7 +179,7 @@ try {
   check('no-store cache header', stateRes.headers.get('cache-control') === 'no-store')
   check('provider list is non-empty', state.providers?.length > 0, `got ${state.providers?.length}`)
   check('provider ids are unique', new Set(state.providers.map((p) => p.id)).size === state.providers.length)
-  for (const id of ['tavily', 'bocha', 'firecrawl', 'serpapi']) {
+  for (const id of ['tavily', 'bocha', 'firecrawl', 'serpapi', 'searchapi', 'scrapingbee', 'scraperapi']) {
     check(`provider "${id}" is registered`, state.providers.some((p) => p.id === id))
   }
   check('every provider carries a label, unit and console URL', state.providers.every((p) => p.label?.zh && p.label?.en && p.unit && p.consoleUrl))
@@ -526,6 +529,47 @@ try {
   check('tinyfish: nested envelope tolerated', normalizeTinyfish({ data: { available_balance: 3.5, currency: 'USD' } }).remaining === 3.5)
   checkThrows('tinyfish: payload without a balance throws', () => normalizeTinyfish({ currency: 'USD' }))
 
+  // SearchApi: account usage + hourly limits
+  const searchapiData = normalizeSearchapi({
+    account: { current_month_usage: 4800, monthly_allowance: 10000, remaining_credits: 5200 },
+    api_usage: { searches_this_hour: 250, hourly_rate_limit: 200000 },
+    subscription: { period_start: '2024-12-04T00:34:59Z', period_end: '2025-01-04T00:34:59Z' },
+  })
+  check('searchapi: remaining / total / used', searchapiData.remaining === 5200 && searchapiData.total === 10000 && searchapiData.used === 4800, JSON.stringify(searchapiData))
+  check('searchapi: unit is requests', searchapiData.unit === 'requests')
+  check('searchapi: period end is resetsAt', searchapiData.resetsAt === '2025-01-04T00:34:59Z')
+  const searchapiExtra = Object.fromEntries(searchapiData.extra.map((item) => [item.key, item.value]))
+  check('searchapi: hourly limits and period start surfaced', searchapiExtra.searchesThisHour === '250' && searchapiExtra.rateLimitPerHour === '200000' && searchapiExtra.billingPeriodStart === '2024-12-04T00:34:59Z')
+  checkThrows('searchapi: empty payload throws', () => normalizeSearchapi({}))
+
+  // ScrapingBee: max_api_credit - used_api_credit
+  const scrapingbeeData = normalizeScrapingbee({
+    max_api_credit: 20000000,
+    used_api_credit: 3704332,
+    max_concurrency: 200,
+    current_concurrency: 1,
+    renewal_subscription_date: '2026-04-18T10:05:58.134Z',
+  })
+  check('scrapingbee: remaining = max - used', scrapingbeeData.remaining === 20000000 - 3704332 && scrapingbeeData.total === 20000000 && scrapingbeeData.used === 3704332)
+  check('scrapingbee: unit is credits', scrapingbeeData.unit === 'credits')
+  check('scrapingbee: renewal date is resetsAt', scrapingbeeData.resetsAt === '2026-04-18T10:05:58.134Z')
+  const scrapingbeeExtra = Object.fromEntries(scrapingbeeData.extra.map((item) => [item.key, item.value]))
+  check('scrapingbee: concurrency surfaced', scrapingbeeExtra.maxConcurrency === '200' && scrapingbeeExtra.currentConcurrency === '1')
+  checkThrows('scrapingbee: empty payload throws', () => normalizeScrapingbee({}))
+
+  // ScraperAPI: requestLimit - requestCount
+  const scraperapiData = normalizeScraperapi({
+    requestCount: 120,
+    failedRequestCount: 5,
+    requestLimit: 1000,
+    concurrencyLimit: 5,
+  })
+  check('scraperapi: remaining = limit - count', scraperapiData.remaining === 880 && scraperapiData.total === 1000 && scraperapiData.used === 120)
+  check('scraperapi: unit is requests', scraperapiData.unit === 'requests')
+  const scraperapiExtra = Object.fromEntries(scraperapiData.extra.map((item) => [item.key, item.value]))
+  check('scraperapi: concurrency and failed counts surfaced', scraperapiExtra.concurrencyLimit === '5' && scraperapiExtra.failedRequests === '5')
+  checkThrows('scraperapi: empty payload throws', () => normalizeScraperapi({}))
+
   // HTTP status → failure code. 402 is how several vendors report an exhausted
   // account; reporting it as a generic HTTP error would hide the one state this
   // plugin exists to surface.
@@ -567,6 +611,9 @@ try {
       bocha: 'auth',
       firecrawl: 'auth',
       serpapi: 'auth',
+      searchapi: 'auth',
+      scrapingbee: 'auth',
+      scraperapi: 'any-terminal',
       tinyfish: 'auth',
     }
     for (const id of ids) await post('/key', { service: id, key: 'invalid-smoke-test-key-0123456789' })

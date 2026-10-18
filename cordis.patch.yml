@@ -22,6 +22,9 @@
           - bocha
           - firecrawl
           - serpapi
+          - searchapi
+          - scrapingbee
+          - scraperapi
           - tinyfish
         # Whether the scheduled refresh runs without a manual click.
         autoRefresh: true

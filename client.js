@@ -107,6 +107,11 @@ window.__ModuleLoader__.load({
         accountEmail: '账号',
         currency: '币种',
         giftBalance: '赠送余额',
+        searchesThisHour: '本小时用量',
+        maxConcurrency: '最大并发',
+        currentConcurrency: '当前并发',
+        concurrencyLimit: '并发上限',
+        failedRequests: '失败请求数',
         injectNoteDefault:
           '调用外部检索/抓取服务前，先参考上面的余额：\n' +
           '1. 同一个目的有多个服务可用时，优先选剩余额度更充裕的那个，让各服务的额度均衡消耗，避免任何一项被提前用尽。\n' +
@@ -203,6 +208,11 @@ window.__ModuleLoader__.load({
         accountEmail: 'Account',
         currency: 'Currency',
         giftBalance: 'Gift balance',
+        searchesThisHour: 'Searches this hour',
+        maxConcurrency: 'Max concurrency',
+        currentConcurrency: 'Current concurrency',
+        concurrencyLimit: 'Concurrency limit',
+        failedRequests: 'Failed requests',
         injectNoteDefault:
           'Before calling an external search or scraping service, check the balances above:\n' +
           '1. When several services can serve the same purpose, prefer the one with more headroom, so that every quota is consumed evenly and none of them runs out early.\n' +
